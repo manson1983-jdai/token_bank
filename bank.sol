@@ -26,7 +26,7 @@ contract TokenBank {
 
 
     // 事件：记录代币接收
-    event TokenReceived(string token, address from, bytes target, uint256 amount, uint256 chainId, uint8 decimals);
+    event TokenReceived(string token, address from, string target, uint256 amount, uint256 chainId, uint8 decimals);
 
     // 事件：记录代币提取
     event TokenWithdrawed(string token, address contractAddr, address target, uint256 amount);
@@ -51,7 +51,7 @@ contract TokenBank {
     }
     
     // 接收代币的函数
-    function depositToken(string memory name, uint256 _amount, bytes memory target) payable external {
+    function depositToken(string memory name, uint256 _amount, string memory target) payable external {
         if (msg.value>0){
             emit TokenReceived("native", msg.sender, target, msg.value, block.chainid, targetDecimal);
             return ;
@@ -86,6 +86,7 @@ contract TokenBank {
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
             uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
 
+            // 检查风控策略
             if (risk.approve(amount,name,target)){
                 require(target.send(amount),"Transfer failed");
                 emit TokenWithdrawed("native", address(0), target, amount);
@@ -102,6 +103,7 @@ contract TokenBank {
             uint8 tokenDecimal = tokenDecimals[name];
             uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
+             // 检查风控策略
             if (risk.approve(amount,name,target)){
                 IERC20 token = IERC20(_token);
                 require(token.transfer(target, amount), "Transfer failed");
