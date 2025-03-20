@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "./safeERC20.sol";
-
+import "./risk.sol";
 
 contract TokenBank {
     using SafeERC20 for IERC20;
@@ -11,6 +11,9 @@ contract TokenBank {
 
     address admin;
     address minter;
+    address approver;
+
+    RiskManager private risk;
 
     // 添加地址到名称的映射
     mapping(string => address) tokenNames; 
@@ -19,6 +22,8 @@ contract TokenBank {
     //mapping(uint256=> address) nativeMappings;
 
     mapping(bytes32 => uint8) done; 
+    mapping(bytes32=>Application) waitingList;
+
 
     // 事件：记录代币接收
     event TokenReceived(string token, address from, bytes target, uint256 amount, uint256 chainId, uint8 decimals);
@@ -26,9 +31,15 @@ contract TokenBank {
     // 事件：记录代币提取
     event TokenWithdrawed(string token, address contractAddr, address target, uint256 amount);
 
-    function init(uint8 _nativeDecimal) external{
+    // 事件：触发风控，人工审核
+    event WaitingApp(bytes32 id, string name, address _token, address target, uint256 amount);
+
+    event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
+
+    function init(address riskAddr) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
+        risk = RiskManager(riskAddr);
     }
 
      // 查询合约中特定代币余额
@@ -74,8 +85,16 @@ contract TokenBank {
     
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
             uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
-            require(target.send(amount),"Transfer failed");
-            emit TokenWithdrawed("native", address(0), target, _amount);
+
+            if (risk.approve(amount,name,target)){
+                require(target.send(amount),"Transfer failed");
+                emit TokenWithdrawed("native", address(0), target, amount);
+            }else{
+                waitingList[hashmsg] = Application(name,target, amount, address(0));
+                emit WaitingApp(hashmsg,"native", address(0), target, amount);
+            }
+
+            
         }else{
             address _token = tokenNames[name];
             require(_token != address(0), "Invalid token address");
@@ -83,15 +102,45 @@ contract TokenBank {
             uint8 tokenDecimal = tokenDecimals[name];
             uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
-            IERC20 token = IERC20(_token);
-            require(token.transfer(target, amount), "Transfer failed");
-            emit TokenWithdrawed(name,_token, target, _amount);
+            if (risk.approve(amount,name,target)){
+                IERC20 token = IERC20(_token);
+                require(token.transfer(target, amount), "Transfer failed");
+                emit TokenWithdrawed(name,_token, target, amount);
+            }else{
+                waitingList[hashmsg] = Application(name,target, amount, _token);
+                emit WaitingApp(hashmsg,name,_token, target, amount);
+            }
+            
         }  
 
         
         done[hashmsg] = 1; // 防止重放
     }
    
+    function approve(bytes32 id)external{
+        require(msg.sender == approver,"no auth fo approve");
+
+        Application memory app = waitingList[id];
+        require(app.amount>0,"no such application");
+
+        string memory name = app.name;
+        address payable target = app.target;
+        uint256 amount = app.amount;
+        address _token = app.token;
+
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
+            require(target.send(amount),"Transfer failed");
+            emit TokenWithdrawApproved("native", address(0), target, amount);
+        }else{
+            IERC20 token = IERC20(_token);
+            require(token.transfer(target, amount), "Transfer failed");
+            emit TokenWithdrawApproved(name,_token, target, amount);
+        }
+
+        delete waitingList[id];
+    }
+
+
     // demo, never used
     // function mintToken(string memory name, address target, uint256 _amount, uint256 chainId, uint8 decimals, bytes memory signature) external { 
     //     require(_amount > 0, "Amount must be greater than 0");
@@ -221,5 +270,12 @@ contract TokenBank {
             // 减小精度
             return amount / (10 ** (fromDecimals - toDecimals));
         }
+    }
+
+    struct Application{
+        string  name;
+        address payable target; 
+        uint256 amount;
+        address token;
     }
 }
