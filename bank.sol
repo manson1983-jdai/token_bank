@@ -7,7 +7,8 @@ import "./safeERC20.sol";
 contract TokenBank {
     using SafeERC20 for IERC20;
     
-    uint8 nativeDecimal;
+    uint8 public constant targetDecimal = 18;
+
     address admin;
     address minter;
 
@@ -28,7 +29,6 @@ contract TokenBank {
     function init(uint8 _nativeDecimal) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
-        nativeDecimal = _nativeDecimal;
     }
 
      // 查询合约中特定代币余额
@@ -42,7 +42,7 @@ contract TokenBank {
     // 接收代币的函数
     function depositToken(string memory name, uint256 _amount, bytes memory target) payable external {
         if (msg.value>0){
-            emit TokenReceived("native", msg.sender, target, msg.value, block.chainid, nativeDecimal);
+            emit TokenReceived("native", msg.sender, target, msg.value, block.chainid, targetDecimal);
             return ;
         }
 
@@ -55,16 +55,17 @@ contract TokenBank {
         require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
         
         uint8 decimal = tokenDecimals[name];
-        emit TokenReceived(name, msg.sender, target, _amount, block.chainid,decimal);
+        emit TokenReceived(name, msg.sender, target, _amount, block.chainid, decimal);
     }
 
      // 提币函数
-    function withdrawToken(string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimals, bytes memory signature) external { 
+    function withdrawToken(string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
         require(_amount > 0, "Amount must be greater than 0");
+    
         require(signature.length != 65,'signature must = 65');
         require(chainId==block.chainid,'chainId error');
 
-        bytes memory str = abi.encodePacked(name,target,_amount,chainId,decimals);
+        bytes memory str = abi.encodePacked(name,target,_amount,chainId,decimal);
         bytes32 hashmsg = keccak256(str);
         require(done[hashmsg]==0,"already done");
 
@@ -72,14 +73,18 @@ contract TokenBank {
         require(tmp==minter, "invalid minter");
     
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
-            require(target.send(_amount),"Transfer failed");
+            uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
+            require(target.send(amount),"Transfer failed");
             emit TokenWithdrawed("native", address(0), target, _amount);
         }else{
             address _token = tokenNames[name];
             require(_token != address(0), "Invalid token address");
+           
+            uint8 tokenDecimal = tokenDecimals[name];
+            uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
             IERC20 token = IERC20(_token);
-            require(token.transfer(target, _amount), "Transfer failed");
+            require(token.transfer(target, amount), "Transfer failed");
             emit TokenWithdrawed(name,_token, target, _amount);
         }  
 
@@ -199,5 +204,22 @@ contract TokenBank {
     function setMinter(address _minter) external{
         require(msg.sender==admin,"invalid sender for changing");
         minter = _minter;
+    }
+
+    // 在任意两个精度之间转换
+    function convertBetweenDecimals(
+        uint256 amount,
+        uint8 fromDecimals,
+        uint8 toDecimals
+    ) public pure returns (uint256) {
+        if (fromDecimals == toDecimals) return amount;
+        
+        if (fromDecimals < toDecimals) {
+            // 放大精度
+            return amount * (10 ** (toDecimals - fromDecimals));
+        } else {
+            // 减小精度
+            return amount / (10 ** (fromDecimals - toDecimals));
+        }
     }
 }
