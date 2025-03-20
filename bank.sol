@@ -104,7 +104,7 @@ contract TokenBank {
             uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
              // 检查风控策略
-            if (risk.approve(amount,name,target)){
+            if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
                 IERC20 token = IERC20(_token);
                 require(token.transfer(target, amount), "Transfer failed");
                 emit TokenWithdrawed(name,_token, target, amount);
