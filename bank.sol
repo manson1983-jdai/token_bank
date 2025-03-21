@@ -73,7 +73,7 @@ contract TokenBank {
     function withdrawToken(string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
         require(_amount > 0, "Amount must be greater than 0");
     
-        require(signature.length != 65,'signature must = 65');
+        require(signature.length == 65,'signature must = 65');
         require(chainId==block.chainid,'chainId error');
 
         bytes memory str = abi.encodePacked(name,target,_amount,chainId,decimal);
