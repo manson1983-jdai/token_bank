@@ -9,6 +9,8 @@ contract TokenBank {
     
     uint8 public constant targetDecimal = 18;
 
+    string natinveName;
+    uint64 nonce;
     address admin;
     address minter;
     address approver;
@@ -19,14 +21,14 @@ contract TokenBank {
     mapping(string => address) tokenNames; 
     mapping(string => uint8) tokenDecimals; 
 
-    //mapping(uint256=> address) nativeMappings;
+    mapping(uint256=> address) nativeMappings;
 
     mapping(bytes32 => uint8) done; 
     mapping(bytes32=>Application) waitingList;
 
 
     // 事件：记录代币接收
-    event TokenReceived(string token, address from, string target, uint256 amount, uint256 chainId, uint8 decimals);
+    event TokenReceived(uint64 nonce, string token, address from, string target, uint256 amount, uint256 chainId, uint8 decimals);
 
     // 事件：记录代币提取
     event TokenWithdrawed(string token, address contractAddr, address target, uint256 amount);
@@ -36,10 +38,13 @@ contract TokenBank {
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
 
-    function init(address riskAddr) external{
+    function init(string memory name) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
-        risk = RiskManager(riskAddr);
+        nonce = 0;
+        natinveName = name;
+
+       // risk = RiskManager(riskAddr);
     }
 
      // 查询合约中特定代币余额
@@ -53,7 +58,7 @@ contract TokenBank {
     // 接收代币的函数
     function depositToken(string memory name, uint256 _amount, string memory target) payable external {
         if (msg.value>0){
-            emit TokenReceived("native", msg.sender, target, msg.value, block.chainid, targetDecimal);
+            emit TokenReceived(nonce++, natinveName, msg.sender, target, msg.value, block.chainid, targetDecimal);
             return ;
         }
 
@@ -66,34 +71,34 @@ contract TokenBank {
         require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
         
         uint8 decimal = tokenDecimals[name];
-        emit TokenReceived(name, msg.sender, target, _amount, block.chainid, decimal);
+        emit TokenReceived(nonce++, name, msg.sender, target, _amount, block.chainid, decimal);
     }
 
      // 提币函数
-    function withdrawToken(bytes memory magic, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
+    function withdrawToken(bytes memory magic, uint64 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
         require(_amount > 0, "Amount must be greater than 0");
         require(magic.length == 8,'magic must = 8');
         require(signature.length == 65,'signature must = 65');
         require(chainId==block.chainid,'chainId error');
 
-        bytes memory str = abi.encodePacked(magic, name,target,_amount,chainId,decimal);
+        bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,chainId,decimal);
         bytes32 hashmsg = keccak256(str);
         require(done[hashmsg]==0,"already done");
 
         address tmp = recover(hashmsg,signature);
         require(tmp==minter, "invalid minter");
     
-        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked(natinveName))) {
             uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
 
             // 检查风控策略
-            if (risk.approve(amount,name,target)){
+            // if (risk.approve(amount,name,target)){
                 require(target.send(amount),"Transfer failed");
                 emit TokenWithdrawed("native", address(0), target, amount);
-            }else{
-                waitingList[hashmsg] = Application(name,target, amount, address(0));
-                emit WaitingApp(hashmsg,"native", address(0), target, amount);
-            }
+            // }else{
+                // waitingList[hashmsg] = Application(name,target, amount, address(0));
+                // emit WaitingApp(hashmsg,"native", address(0), target, amount);
+            // }
 
             
         }else{
@@ -104,14 +109,14 @@ contract TokenBank {
             uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
              // 检查风控策略
-            if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
+            // if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
                 IERC20 token = IERC20(_token);
                 require(token.transfer(target, amount), "Transfer failed");
                 emit TokenWithdrawed(name,_token, target, amount);
-            }else{
-                waitingList[hashmsg] = Application(name,target, amount, _token);
-                emit WaitingApp(hashmsg,name,_token, target, amount);
-            }
+            // }else{
+                // waitingList[hashmsg] = Application(name,target, amount, _token);
+                // emit WaitingApp(hashmsg,name,_token, target, amount);
+            // }
             
         }  
 
@@ -143,27 +148,35 @@ contract TokenBank {
     }
 
 
-    // demo, never used
-    // function mintToken(string memory name, address target, uint256 _amount, uint256 chainId, uint8 decimals, bytes memory signature) external { 
+   
+   // mixchain 上给钱
+    // function mintToken(bytes memory magic, uint64 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimals, bytes memory signature) external { 
     //     require(_amount > 0, "Amount must be greater than 0");
-    //     require(signature.length != 65,'signature must = 65');
+    //     require(signature.length == 65,'signature must = 65');
+    //     require(magic.length == 8,'magic must = 8');
 
-    //     bytes memory str = abi.encodePacked(name,target,_amount,chainId,decimals);
+    //     bytes memory str = abi.encodePacked(magic,nonce,name,target,_amount,chainId,decimals);
     //     bytes32 hashmsg = keccak256(str);
-    //     require(done[hashmsg]==0,"already done");
-    //     done[hashmsg] = 1; // 防止重放
+
 
     //     address tmp = recover(hashmsg,signature);
     //     require(tmp==minter, "invalid minter");
     
-    //     //todo: 处理decimal
-    //     if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
+        
+    //     //uint256 amount = convertBetweenDecimals(_amount,decimals,tokenDecimal);
+
+    //     if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("sol"))){
+    //         // transfer sol
+            
+    //     }else if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("native"))) {
+    //         // 处理 eth、bnb
     //         address _token = nativeMappings[chainId];
     //         require(_token != address(0), "Invalid token address");
 
     //         IERC20 token = IERC20(_token);
     //         require(token.transfer(target, _amount), "Transfer failed");
     //     }else{
+    //         // 处理 usdt、usdc、mixtoken
     //         address _token = tokenNames[name];
     //         require(_token != address(0), "Invalid token address");
 
@@ -172,7 +185,7 @@ contract TokenBank {
     //     }  
     // }
 
-    function recover(bytes32 hashmsg,bytes memory signedString) private pure returns (address)
+    function recover(bytes32 hashmsg, bytes memory signedString) private pure returns (address)
     {
         bytes32  r = bytesToBytes32(slice(signedString, 0, 32));
         bytes32  s = bytesToBytes32(slice(signedString, 32, 32));
@@ -210,9 +223,6 @@ contract TokenBank {
             result := mload(add(source, 32))
         }
     }
-
-
-
 
     function addToken(address token,  string memory name) external{
         require(msg.sender==admin,"invalid sender");
