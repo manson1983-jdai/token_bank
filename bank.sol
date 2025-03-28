@@ -6,8 +6,6 @@ import "./risk.sol";
 
 contract TokenBank {
     using SafeERC20 for IERC20;
-    
-    uint8 public constant targetDecimal = 18;
 
     string natinveName;
     uint64 nonce;
@@ -21,7 +19,7 @@ contract TokenBank {
     mapping(string => address) tokenNames; 
     mapping(string => uint8) tokenDecimals; 
 
-    mapping(uint256=> address) nativeMappings;
+    //mapping(uint256=> address) nativeMappings;
 
     mapping(bytes32 => uint8) done; 
     mapping(bytes32=>Application) waitingList;
@@ -58,7 +56,8 @@ contract TokenBank {
     // 接收代币的函数
     function depositToken(string memory name, uint256 _amount, string memory target) payable external {
         if (msg.value>0){
-            emit TokenReceived(nonce++, natinveName, msg.sender, target, msg.value, block.chainid, targetDecimal);
+            uint256 amount = convertBetweenDecimals(msg.value,18,9);
+            emit TokenReceived(nonce++, natinveName, msg.sender, target, amount, block.chainid, 9);
             return ;
         }
 
@@ -71,13 +70,18 @@ contract TokenBank {
         require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
         
         uint8 decimal = tokenDecimals[name];
-        emit TokenReceived(nonce++, name, msg.sender, target, _amount, block.chainid, decimal);
+        uint8 targetDecimal = 9;
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdc")))){
+            targetDecimal = 6;
+        }
+        uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
+        emit TokenReceived(nonce++, name, msg.sender, target, amount, block.chainid, 9);
     }
 
      // 提币函数
     function withdrawToken(bytes memory magic, uint64 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
         require(_amount > 0, "Amount must be greater than 0");
-        require(magic.length == 8,'magic must = 8');
+        require(magic.length == 32,'magic must = 32');
         require(signature.length == 65,'signature must = 65');
         require(chainId==block.chainid,'chainId error');
 
@@ -89,7 +93,7 @@ contract TokenBank {
         require(tmp==minter, "invalid minter");
     
         if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked(natinveName))) {
-            uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
+            uint256 amount = convertBetweenDecimals(_amount,decimal,18);
 
             // 检查风控策略
             // if (risk.approve(amount,name,target)){
