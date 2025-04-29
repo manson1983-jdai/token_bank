@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-// 0x4FbD51aF8f7672FbC478e168Da95b2DE09da32eF
 pragma solidity ^0.8.0;
 
 import "./safeERC20.sol";
@@ -27,7 +26,7 @@ contract TokenBank {
 
 
     // 事件：记录代币接收
-    event TokenReceived(uint64 nonce, string token, address from, string target, uint256 amount, uint256 chainId, uint8 decimals);
+    event TokenReceived(uint64 nonce, string token, address from, string target, uint256 amount, uint256 chainId, uint256 toChainId, uint8 decimals);
 
     // 事件：记录代币提取
     event TokenWithdrawed(string token, address contractAddr, address target, uint256 amount);
@@ -36,6 +35,15 @@ contract TokenBank {
     event WaitingApp(bytes32 id, string name, address _token, address target, uint256 amount);
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
+
+    function getNonce() external view returns (uint64) {
+        return nonce;
+    }
+
+    function setNonce(uint64 newNonce) external{
+        require(msg.sender== admin,"no auth");
+        nonce = newNonce;
+    }
 
     function init(string memory name) external{
         require(admin == address(0), "already inited");
@@ -58,7 +66,7 @@ contract TokenBank {
     function depositToken(string memory name, uint256 _amount, string memory target) payable external {
         if (msg.value>0){
             uint256 amount = convertBetweenDecimals(msg.value,18,9);
-            emit TokenReceived(nonce++, natinveName, msg.sender, target, amount, block.chainid, 9);
+            emit TokenReceived(nonce++, natinveName, msg.sender, target, amount, block.chainid, 8888,9);
             return ;
         }
 
@@ -76,7 +84,7 @@ contract TokenBank {
             targetDecimal = 6;
         }
         uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
-        emit TokenReceived(nonce++, name, msg.sender, target, amount, block.chainid, 9);
+        emit TokenReceived(nonce++, name, msg.sender, target, amount, block.chainid, 8888, 9);
     }
 
     // function testhash(bytes memory magic, uint256 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) public view returns (bytes32){
@@ -91,16 +99,13 @@ contract TokenBank {
     //     return str;
     // }
 
-
-
      // 提币函数
-    function withdrawToken(bytes memory magic, uint256 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) external { 
+    function withdrawToken(bytes memory magic, uint64 nonce, string memory name, address payable target, uint64 _amount, uint64 fromChainId, uint8 decimal, bytes memory signature) external { 
         require(_amount > 0, "Amount must be greater than 0");
         require(magic.length == 8,'magic must = 8');
         require(signature.length == 65,'signature must = 65');
-        require(chainId==block.chainid,'chainId error');
-
-        bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,chainId);
+    
+        bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,fromChainId, block.chainid);
         bytes32 hashmsg = keccak256(str);
         require(done[hashmsg]==0,"already done");
 
