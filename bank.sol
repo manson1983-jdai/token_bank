@@ -8,16 +8,20 @@ contract TokenBank {
     using SafeERC20 for IERC20;
 
     string natinveName;
-    uint64 nonce;
-    address admin;
+   
+    address public admin;
     address minter;
     address approver;
 
     RiskManager private risk;
 
     // 添加地址到名称的映射
-    mapping(string => address) tokenNames; 
-    mapping(string => uint8) tokenDecimals; 
+    mapping(string => address) public tokenNames; 
+    mapping(string => uint8) public tokenDecimals; 
+
+    mapping(uint256=>uint64) public nonces;
+
+    mapping(address => mapping(string =>uint256)) public liq;
 
     //mapping(uint256=> address) nativeMappings;
 
@@ -26,7 +30,7 @@ contract TokenBank {
 
 
     // 事件：记录代币接收
-    event TokenReceived(uint64 nonce, string token, address from, string target, uint256 amount, uint256 chainId, uint256 toChainId, uint8 decimals);
+    event TokenReceived(uint64 nonce, string token, string target, uint256 amount, uint256 chainId, uint256 toChainId, uint8 decimals);
 
     // 事件：记录代币提取
     event TokenWithdrawed(string token, address contractAddr, address target, uint256 amount);
@@ -36,19 +40,15 @@ contract TokenBank {
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
 
-    function getNonce() external view returns (uint64) {
-        return nonce;
-    }
 
-    function setNonce(uint64 newNonce) external{
+    function setNonce(uint256 chainId, uint64 newNonce) external{
         require(msg.sender== admin,"no auth");
-        nonce = newNonce;
+        nonces[chainId] = newNonce;
     }
 
     function init(string memory name) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
-        nonce = 0;
         natinveName = name;
 
        // risk = RiskManager(riskAddr);
@@ -63,10 +63,11 @@ contract TokenBank {
     }
     
     // 接收代币的函数
-    function depositToken(string memory name, uint256 _amount, string memory target) payable external {
+    function depositToken(string memory name, uint256 _amount, uint256 toChainId, string memory target) payable external {
         if (msg.value>0){
             uint256 amount = convertBetweenDecimals(msg.value,18,9);
-            emit TokenReceived(nonce++, natinveName, msg.sender, target, amount, block.chainid, 8888,9);
+            emit TokenReceived(nonces[0], natinveName, target, amount, block.chainid, toChainId,9);
+            nonces[0]+=1;
             return ;
         }
 
@@ -80,22 +81,24 @@ contract TokenBank {
         
         uint8 decimal = tokenDecimals[name];
         uint8 targetDecimal = 9;
-        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdc")))){
+        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("mix"))||keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdc")))){
             targetDecimal = 6;
         }
         uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
-        emit TokenReceived(nonce++, name, msg.sender, target, amount, block.chainid, 8888, 9);
+
+        emit TokenReceived(nonces[toChainId], name, target, amount, block.chainid, toChainId, targetDecimal);
+        nonces[toChainId]+=1;
     }
 
-    // function testhash(bytes memory magic, uint256 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) public view returns (bytes32){
-    //     bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,chainId);
+    // function testhash(bytes memory magic, uint64 nonce, string memory name, address payable target, uint64 _amount, uint64 fromChainId, uint64 tochain) public view returns (bytes32){
+    //      bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,fromChainId, tochain);
     //     bytes32 hashmsg = keccak256(str);
 
     //     return hashmsg;
     // }
 
-    // function testhashraw(bytes memory magic, uint256 nonce, string memory name, address payable target, uint256 _amount, uint256 chainId, uint8 decimal, bytes memory signature) public view returns (bytes memory){
-    //     bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,chainId);
+    // function testhashraw(bytes memory magic, uint64 nonce, string memory name, address payable target, uint64 _amount, uint64 fromChainId, uint64 tochain ) public view returns (bytes memory){
+    //     bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,fromChainId, tochain);
     //     return str;
     // }
 
@@ -105,7 +108,7 @@ contract TokenBank {
         require(magic.length == 8,'magic must = 8');
         require(signature.length == 65,'signature must = 65');
     
-        bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,fromChainId, block.chainid);
+        bytes memory str = abi.encodePacked(magic, nonce, name,target,_amount,fromChainId, uint64(block.chainid));
         bytes32 hashmsg = keccak256(str);
         require(done[hashmsg]==0,"already done");
 
@@ -146,6 +149,42 @@ contract TokenBank {
 
         
         done[hashmsg] = 1; // 防止重放
+    }
+
+    // 增加流动性
+    function addLiquity(string memory name, uint256 amount) external{
+        require(amount>0, "amount must >0");
+
+        address _token = tokenNames[name];
+        require(_token != address(0), "Invalid token name");
+        
+        IERC20 token = IERC20(_token);
+        require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+
+        liq[msg.sender][name]+=amount;
+
+    }
+
+    // 减少流动性
+    function delLiquity(string memory name, uint256 amount) external{
+        require(amount>0, "amount must >0");
+        require(liq[msg.sender][name]>amount, "not enough liq");
+
+        address _token = tokenNames[name];
+        require(_token != address(0), "Invalid token name");
+        
+        IERC20 token = IERC20(_token);
+        require(token.transfer(msg.sender, amount), "Transfer failed");
+
+        liq[msg.sender][name]-=amount;
+    }
+
+    function queryLiquity(string memory name, address owner) external view returns (uint256){
+        address _token = tokenNames[name];
+        require(_token != address(0), "Invalid token name");
+        
+
+        return liq[owner][name];
     }
    
     function approve(bytes32 id)external{
