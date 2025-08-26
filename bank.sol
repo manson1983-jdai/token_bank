@@ -9,7 +9,7 @@ contract TokenBank {
 
     string natinveName;
    
-    address public admin;
+    address admin;
     address minter;
     address approver;
 
@@ -49,14 +49,15 @@ contract TokenBank {
     function init(string memory name) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
-        natinveName = name;
+        natinveName = toLowerCase(name);
 
        // risk = RiskManager(riskAddr);
     }
 
      // 查询合约中特定代币余额
     function getTokenBalance(string memory name) external view returns (uint256) {
-        address _token = tokenNames[name];
+        string memory _name = toLowerCase(name);
+        address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
 
         return IERC20(_token).balanceOf(address(this));
@@ -73,20 +74,21 @@ contract TokenBank {
 
         require(_amount > 0, "Amount must be greater than 0");
 
-        address _token = tokenNames[name];
+        string memory _name = toLowerCase(name);
+        address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
         
         IERC20 token = IERC20(_token);
         require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
         
-        uint8 decimal = tokenDecimals[name];
+        uint8 decimal = tokenDecimals[_name];
         uint8 targetDecimal = 9;
-        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("mix"))||keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked("usdc")))){
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc")))){
             targetDecimal = 6;
         }
         uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
 
-        emit TokenReceived(nonces[toChainId], name, target, amount, block.chainid, toChainId, targetDecimal);
+        emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, targetDecimal);
         nonces[toChainId]+=1;
     }
 
@@ -115,7 +117,8 @@ contract TokenBank {
         address tmp = recover(hashmsg,signature);
         require(tmp==minter, "invalid minter");
     
-        if (keccak256(abi.encodePacked(name)) == keccak256(abi.encodePacked(natinveName))) {
+        string memory _name = toLowerCase(name);
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked(natinveName))) {
             uint256 amount = convertBetweenDecimals(_amount,decimal,18);
 
             // 检查风控策略
@@ -129,17 +132,17 @@ contract TokenBank {
 
             
         }else{
-            address _token = tokenNames[name];
+            address _token = tokenNames[_name];
             require(_token != address(0), "Invalid token address");
            
-            uint8 tokenDecimal = tokenDecimals[name];
+            uint8 tokenDecimal = tokenDecimals[_name];
             uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
              // 检查风控策略
             // if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
                 IERC20 token = IERC20(_token);
                 require(token.transfer(target, amount), "Transfer failed");
-                emit TokenWithdrawed(name,_token, target, amount);
+                emit TokenWithdrawed(_name,_token, target, amount);
             // }else{
                 // waitingList[hashmsg] = Application(name,target, amount, _token);
                 // emit WaitingApp(hashmsg,name,_token, target, amount);
@@ -155,36 +158,41 @@ contract TokenBank {
     function addLiquity(string memory name, uint256 amount) external{
         require(amount>0, "amount must >0");
 
-        address _token = tokenNames[name];
+        string memory _name = toLowerCase(name);
+        address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
         
         IERC20 token = IERC20(_token);
         require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
 
-        liq[msg.sender][name]+=amount;
+        liq[msg.sender][_name]+=amount;
 
     }
 
     // 减少流动性
     function delLiquity(string memory name, uint256 amount) external{
         require(amount>0, "amount must >0");
-        require(liq[msg.sender][name]>amount, "not enough liq");
 
-        address _token = tokenNames[name];
+        string memory _name = toLowerCase(name);
+        require(liq[msg.sender][_name]>amount, "not enough liq");
+
+        address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
         
         IERC20 token = IERC20(_token);
         require(token.transfer(msg.sender, amount), "Transfer failed");
 
-        liq[msg.sender][name]-=amount;
+        liq[msg.sender][_name]-=amount;
     }
 
     function queryLiquity(string memory name, address owner) external view returns (uint256){
-        address _token = tokenNames[name];
+        string memory _name = toLowerCase(name);
+
+        address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
         
 
-        return liq[owner][name];
+        return liq[owner][_name];
     }
    
     function approve(bytes32 id)external{
@@ -289,21 +297,23 @@ contract TokenBank {
 
     function addToken(address token,  string memory name) external{
         require(msg.sender==admin,"invalid sender");
-        require(tokenNames[name] == address(0), "duplicated name");
+
+        string memory _name = toLowerCase(name);
+        require(tokenNames[_name] == address(0), "duplicated name");
 
         // 获取 token 的 decimals
         uint8 decimals = IERC20Metadata(token).decimals();
         
-        tokenNames[name] = token;
-        tokenDecimals[name] = decimals;
+        tokenNames[_name] = token;
+        tokenDecimals[_name] = decimals;
     }
 
     function removeToken(string memory name) external{
         require(msg.sender==admin,"invalid sender");
         
-    
-        delete tokenNames[name];
-        delete tokenDecimals[name];
+        string memory _name = toLowerCase(name);
+        delete tokenNames[_name];
+        delete tokenDecimals[_name];
     }
 
     // function addNativeToken(address token,  uint256 chainId) external{
@@ -349,6 +359,26 @@ contract TokenBank {
             // 减小精度
             return amount / (10 ** (fromDecimals - toDecimals));
         }
+    }
+
+    function toLowerCase(string memory _str) public pure returns (string memory) {
+        bytes memory strBytes = bytes(_str);
+        bytes memory lowerBytes = new bytes(strBytes.length);
+        
+        for (uint i = 0; i < strBytes.length; i++) {
+            bytes1 char = strBytes[i];
+            
+            // 检查是否为大写字母 (A-Z ASCII: 65-90)
+            if (char >= 0x41 && char <= 0x5A) {
+                // 转换为小写字母 (a-z ASCII: 97-122)
+                lowerBytes[i] = bytes1(uint8(char) + 32);
+            } else {
+                // 保持原字符不变
+                lowerBytes[i] = char;
+            }
+        }
+        
+        return string(lowerBytes);
     }
 
     struct Application{
