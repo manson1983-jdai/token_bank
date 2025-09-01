@@ -174,7 +174,7 @@ contract TokenBank {
         require(amount>0, "amount must >0");
 
         string memory _name = toLowerCase(name);
-        require(liq[msg.sender][_name]>amount, "not enough liq");
+        require(liq[msg.sender][_name]>=amount, "not enough liq");
 
         address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
