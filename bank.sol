@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "./safeERC20.sol";
 import "./risk.sol";
+import "./muUsd.sol";
 
 contract TokenBank {
     using SafeERC20 for IERC20;
@@ -57,8 +58,12 @@ contract TokenBank {
        // risk = RiskManager(riskAddr);
     }
 
+    function chainId() external view returns(uint256){
+        return block.chainid;
+    }
+
     // 存入usdc/usdt，给muUSD
-    function mappingMUSD(string memory name,uint256 amount, uint64 chainId, string memory target)external{
+    function mappingMUSD(string memory name,uint256 amount, uint256 toChainId, string memory target)external{
         require(amount > 0, "Amount must be greater than 0");
 
         string memory _name = toLowerCase(name);
@@ -69,16 +74,58 @@ contract TokenBank {
         IERC20 token = IERC20(_token);
         require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
         
-        if (block.chainid == chainId){
-            address _token = tokenNames["musd"];
-            require(_token != address(0), "Invalid token name");
-            IERC20 token = IERC20(_token);
-            require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
-        
+        if (block.chainid == toChainId){
+            address targetAddr = stringToAddress(target);
+            mintMUSD(targetAddr,amount);
             return; 
         }
-        emit UReceived(0,target,block.chainid,chainId,amount);
 
+        emit UReceived(nonces[toChainId],target,block.chainid,toChainId,amount);
+        nonces[toChainId]+=1;
+    }
+
+    function mintMUSD(address target, uint256 amount) private{
+        address _token = tokenNames["musd"];
+        require(_token != address(0), "Invalid token name");
+
+        IMintableToken token = IMintableToken(_token);
+        token.mint(target,amount);
+    }
+
+    function mintMUSDWithSign(bytes memory magic, uint64 nonce, address payable target, uint64 _amount, uint64 fromChainId, uint8 decimal, bytes memory signature) external { 
+        require(_amount > 0, "Amount must be greater than 0");
+        require(magic.length == 8,'magic must = 8');
+        require(signature.length == 65,'signature must = 65');
+    
+        bytes memory str = abi.encodePacked(magic, nonce, target,_amount,fromChainId, uint64(block.chainid));
+        bytes32 hashmsg = keccak256(str);
+        require(done[hashmsg]==0,"already done");
+
+        address tmp = recover(hashmsg,signature);
+        require(tmp==minter, "invalid minter");
+
+        mintMUSD(target, _amount);
+        done[hashmsg] = 1; 
+    }
+
+    // 销毁muUSD，给U
+    function withdrawUSD(string memory name, address target, uint64 amount) external{
+        require(amount > 0, "Amount must be greater than 0");
+
+        string memory _name = toLowerCase(name);
+        require (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))), "only usdt and usdc can be mapping");
+        address _uToken = tokenNames[_name];
+        require(_uToken != address(0), "Invalid token name");
+       
+        address _token = tokenNames["musd"];
+        require(_token != address(0), "Invalid musd");
+        IMintableToken token = IMintableToken(_token);
+        require(token.balanceOf(msg.sender)>=amount,"not enough musd");
+
+        IERC20 uToken = IERC20(_uToken);
+        require(uToken.transfer(target, amount), "not enough u");
+
+        token.burnByOwner(msg.sender, amount);
     }
 
      // 查询合约中特定代币余额
@@ -406,6 +453,28 @@ contract TokenBank {
         }
         
         return string(lowerBytes);
+    }
+
+    function stringToAddress(string memory str) public pure returns (address) {
+        bytes memory strBytes = bytes(str);
+        require(strBytes.length == 42, "Invalid address length");
+        require(strBytes[0] == '0' && strBytes[1] == 'x', "Invalid address format");
+        
+        uint160 result = 0;
+        for (uint i = 2; i < 42; i++) {
+            result *= 16;
+            uint8 charValue = uint8(strBytes[i]);
+            if (charValue >= 48 && charValue <= 57) {
+                result += charValue - 48;
+            } else if (charValue >= 65 && charValue <= 70) {
+                result += charValue - 55;
+            } else if (charValue >= 97 && charValue <= 102) {
+                result += charValue - 87;
+            } else {
+                revert("Invalid hex character");
+            }
+        }
+        return address(result);
     }
 
     struct Application{
