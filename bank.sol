@@ -109,7 +109,7 @@ contract TokenBank {
     }
 
     // 销毁muUSD，给U
-    function withdrawUSD(string memory name, address target, uint64 amount) external{
+    function withdrawUSD(string memory name, uint256 toChainId, address target, uint64 amount) external{
         require(amount > 0, "Amount must be greater than 0");
 
         string memory _name = toLowerCase(name);
@@ -122,8 +122,14 @@ contract TokenBank {
         IMintableToken token = IMintableToken(_token);
         require(token.balanceOf(msg.sender)>=amount,"not enough musd");
 
-        IERC20 uToken = IERC20(_uToken);
-        require(uToken.transfer(target, amount), "not enough u");
+        if (block.chainid == toChainId){
+            IERC20 uToken = IERC20(_uToken);
+            require(uToken.transfer(target, amount), "not enough u");
+        }else{
+            emit TokenReceived(nonces[toChainId], "usdc", addressToString(target), amount, block.chainid, toChainId, 6);
+            nonces[toChainId]+=1;
+        }
+        
 
         token.burnByOwner(msg.sender, amount);
     }
@@ -475,6 +481,37 @@ contract TokenBank {
             }
         }
         return address(result);
+    }
+
+    /**
+     * @dev 将地址转换为字符串（带0x前缀）
+     * @param addr 要转换的地址
+     * @return 字符串格式的地址
+     */
+    function addressToString(address addr) public pure returns (string memory) {
+        bytes memory s = new bytes(40);
+        for (uint i = 0; i < 20; i++) {
+            bytes1 b = bytes1(uint8(uint160(addr) / (2**(8*(19 - i)))));
+            bytes1 hi = bytes1(uint8(b) / 16);
+            bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+            s[2*i] = char(hi);
+            s[2*i+1] = char(lo);
+        }
+
+        return string(abi.encodePacked("0x", s));
+    }
+    
+    /**
+     * @dev 将数字转换为十六进制字符
+     * @param b 数字
+     * @return 十六进制字符
+     */
+    function char(bytes1 b) internal pure returns (bytes1) {
+        if (uint8(b) < 10) {
+            return bytes1(uint8(b) + 0x30);
+        }
+         
+        return bytes1(uint8(b) + 0x57);
     }
 
     struct Application{
