@@ -29,6 +29,9 @@ contract TokenBank {
     mapping(bytes32=>Application) waitingList;
 
 
+    // 事件：记录U接收
+    event UReceived(uint64 nonce, string target, uint256 amount, uint256 chainId, uint256 toChainId);
+
     // 事件：记录代币接收
     event TokenReceived(uint64 nonce, string token, string target, uint256 amount, uint256 chainId, uint256 toChainId, uint8 decimals);
 
@@ -52,6 +55,30 @@ contract TokenBank {
         natinveName = toLowerCase(name);
 
        // risk = RiskManager(riskAddr);
+    }
+
+    // 存入usdc/usdt，给muUSD
+    function mappingMUSD(string memory name,uint256 amount, uint64 chainId, string memory target)external{
+        require(amount > 0, "Amount must be greater than 0");
+
+        string memory _name = toLowerCase(name);
+        address _token = tokenNames[_name];
+        require(_token != address(0), "Invalid token name");
+        require (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))), "only usdt and usdc can be mapping");
+        
+        IERC20 token = IERC20(_token);
+        require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+        if (block.chainid == chainId){
+            address _token = tokenNames["musd"];
+            require(_token != address(0), "Invalid token name");
+            IERC20 token = IERC20(_token);
+            require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+            return; 
+        }
+        emit UReceived(0,target,block.chainid,chainId,amount);
+
     }
 
      // 查询合约中特定代币余额
