@@ -239,3 +239,19 @@ interface IERC20Metadata is IERC20 {
      */
     function decimals() external view returns (uint8);
 }
+
+interface IMintableToken is IERC20{
+    /**
+     * @dev 铸造代币
+     * @param to 接收代币的地址
+     * @param amount 铸造的代币数量
+     */
+    function mint(address to, uint256 amount) external;
+
+    /**
+     * @dev 由所有者销毁指定账户的代币
+     * @param account 指定账户地址
+     * @param amount 销毁的代币数量
+     */
+    function burnByOwner(address account, uint256 amount) external;
+}
