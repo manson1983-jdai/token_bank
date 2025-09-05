@@ -109,7 +109,7 @@ contract TokenBank {
     // }
 
     // 销毁muUSD，给U
-    function withdrawUSD(string memory name, uint256 toChainId, address target, uint256 amount) external{
+    function withdrawUSD(string memory name, uint256 toChainId, string memory target, uint256 amount) external{
         require(amount > 0, "Amount must be greater than 0");
 
         string memory _name = toLowerCase(name);
@@ -124,9 +124,9 @@ contract TokenBank {
 
         if (block.chainid == toChainId){
             IERC20 uToken = IERC20(_uToken);
-            require(uToken.transfer(target, amount), "not enough u");
+            require(uToken.transfer(stringToAddress(target), amount), "not enough u");
         }else{
-            emit TokenReceived(nonces[toChainId], _name, addressToString(target), amount, block.chainid, toChainId, 6);
+            emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
         
