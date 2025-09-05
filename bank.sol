@@ -80,7 +80,7 @@ contract TokenBank {
             return; 
         }
 
-        emit UReceived(nonces[toChainId],target,block.chainid,toChainId,amount);
+        emit TokenReceived(nonces[toChainId], "musd", target, amount, block.chainid, toChainId, 6);
         nonces[toChainId]+=1;
     }
 
@@ -92,21 +92,21 @@ contract TokenBank {
         token.mint(target,amount);
     }
 
-    function mintMUSDWithSign(bytes memory magic, uint64 nonce, address payable target, uint64 _amount, uint64 fromChainId, uint8 decimal, bytes memory signature) external { 
-        require(_amount > 0, "Amount must be greater than 0");
-        require(magic.length == 8,'magic must = 8');
-        require(signature.length == 65,'signature must = 65');
+    // function mintMUSDWithSign(bytes memory magic, uint64 nonce, address payable target, uint64 _amount, uint64 fromChainId, uint8 decimal, bytes memory signature) external { 
+    //     require(_amount > 0, "Amount must be greater than 0");
+    //     require(magic.length == 8,'magic must = 8');
+    //     require(signature.length == 65,'signature must = 65');
     
-        bytes memory str = abi.encodePacked(magic, nonce, target,_amount,fromChainId, uint64(block.chainid));
-        bytes32 hashmsg = keccak256(str);
-        require(done[hashmsg]==0,"already done");
+    //     bytes memory str = abi.encodePacked(magic, nonce, target,_amount,fromChainId, uint64(block.chainid));
+    //     bytes32 hashmsg = keccak256(str);
+    //     require(done[hashmsg]==0,"already done");
 
-        address tmp = recover(hashmsg,signature);
-        require(tmp==minter, "invalid minter");
+    //     address tmp = recover(hashmsg,signature);
+    //     require(tmp==minter, "invalid minter");
 
-        mintMUSD(target, _amount);
-        done[hashmsg] = 1; 
-    }
+    //     mintMUSD(target, _amount);
+    //     done[hashmsg] = 1; 
+    // }
 
     // 销毁muUSD，给U
     function withdrawUSD(string memory name, uint256 toChainId, address target, uint256 amount) external{
@@ -126,7 +126,7 @@ contract TokenBank {
             IERC20 uToken = IERC20(_uToken);
             require(uToken.transfer(target, amount), "not enough u");
         }else{
-            emit TokenReceived(nonces[toChainId], "usdc", addressToString(target), amount, block.chainid, toChainId, 6);
+            emit TokenReceived(nonces[toChainId], _name, addressToString(target), amount, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
         
