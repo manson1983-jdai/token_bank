@@ -31,7 +31,7 @@ contract TokenBank {
 
 
     // 事件：记录U接收
-    event UReceived(uint64 nonce, string target, uint256 amount, uint256 chainId, uint256 toChainId);
+    // event UReceived(uint64 nonce, string target, uint256 amount, uint256 chainId, uint256 toChainId);
 
     // 事件：记录代币接收
     event TokenReceived(uint64 nonce, string token, string target, uint256 amount, uint256 chainId, uint256 toChainId, uint8 decimals);
