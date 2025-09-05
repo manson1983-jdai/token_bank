@@ -63,7 +63,7 @@ contract TokenBank {
     }
 
     // 存入usdc/usdt，给muUSD
-    function mappingMUSD(string memory name,uint256 amount, uint256 toChainId, string memory target)external{
+    function mappingMUSD(string memory name, uint256 toChainId, string memory target,uint256 amount)external{
         require(amount > 0, "Amount must be greater than 0");
 
         string memory _name = toLowerCase(name);
@@ -109,7 +109,7 @@ contract TokenBank {
     }
 
     // 销毁muUSD，给U
-    function withdrawUSD(string memory name, uint256 toChainId, address target, uint64 amount) external{
+    function withdrawUSD(string memory name, uint256 toChainId, address target, uint256 amount) external{
         require(amount > 0, "Amount must be greater than 0");
 
         string memory _name = toLowerCase(name);
@@ -157,13 +157,20 @@ contract TokenBank {
         string memory _name = toLowerCase(name);
         address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
+       
+
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
+            IMintableToken token = IMintableToken(_token);
+            token.burnByOwner(msg.sender, _amount);
+        }else{
+            IERC20 token = IERC20(_token);
+            require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
+        }
         
-        IERC20 token = IERC20(_token);
-        require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
         
         uint8 decimal = tokenDecimals[_name];
         uint8 targetDecimal = 9;
-        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc")))){
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))) || keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
             targetDecimal = 6;
         }
         uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
@@ -198,9 +205,17 @@ contract TokenBank {
         require(tmp==minter, "invalid minter");
     
         string memory _name = toLowerCase(name);
+
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
+            uint256 amount = convertBetweenDecimals(_amount,decimal,6);
+            mintMUSD(target,amount);
+            done[hashmsg] = 1;
+            return;
+        }
+
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked(natinveName))) {
             uint256 amount = convertBetweenDecimals(_amount,decimal,18);
-
+            done[hashmsg] = 1;
             // 检查风控策略
             // if (risk.approve(amount,name,target)){
                 require(target.send(amount),"Transfer failed");
@@ -209,28 +224,24 @@ contract TokenBank {
                 // waitingList[hashmsg] = Application(name,target, amount, address(0));
                 // emit WaitingApp(hashmsg,"native", address(0), target, amount);
             // }
+            return;  
+        }
 
-            
-        }else{
-            address _token = tokenNames[_name];
-            require(_token != address(0), "Invalid token address");
+        address _token = tokenNames[_name];
+        require(_token != address(0), "Invalid token address");
            
-            uint8 tokenDecimal = tokenDecimals[_name];
-            uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
+        uint8 tokenDecimal = tokenDecimals[_name];
+        uint256 amount = convertBetweenDecimals(_amount,decimal,tokenDecimal);
 
-             // 检查风控策略
-            // if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
-                IERC20 token = IERC20(_token);
-                require(token.transfer(target, amount), "Transfer failed");
-                emit TokenWithdrawed(_name,_token, target, amount);
+        // 检查风控策略
+        // if (risk.approve(convertBetweenDecimals(_amount,decimal,targetDecimal),name,target)){
+            IERC20 token = IERC20(_token);
+            require(token.transfer(target, amount), "Transfer failed");
+            emit TokenWithdrawed(_name,_token, target, amount);
             // }else{
                 // waitingList[hashmsg] = Application(name,target, amount, _token);
                 // emit WaitingApp(hashmsg,name,_token, target, amount);
             // }
-            
-        }  
-
-        
         done[hashmsg] = 1; // 防止重放
     }
 
