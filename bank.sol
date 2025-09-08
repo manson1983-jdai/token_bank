@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "./safeERC20.sol";
 import "./risk.sol";
 import "./muUsd.sol";
-import "./fee.sol";
+
 
 contract TokenBank {
     using SafeERC20 for IERC20;
@@ -16,11 +16,13 @@ contract TokenBank {
     address approver;
 
     RiskManager private risk;
-    FeeCalculator private feeCalculator;
 
     // 添加地址到名称的映射
     mapping(string => address) public tokenNames; 
     mapping(string => uint8) public tokenDecimals; 
+    mapping(string => uint256) public baseFees; 
+    mapping(string => uint256) public protocolFees; 
+    mapping(string => uint8) public protocolFeesDecimals; 
 
     mapping(uint256=>uint64) public nonces;
 
@@ -46,11 +48,6 @@ contract TokenBank {
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
 
-    function setFeeCalculator(address _feeCalculator) external{
-        require(msg.sender== admin,"no auth");
-        feeCalculator = FeeCalculator(_feeCalculator);
-    }
-
     function setNonce(uint256 chainId, uint64 newNonce) external{
         require(msg.sender== admin,"no auth");
         nonces[chainId] = newNonce;
@@ -66,6 +63,25 @@ contract TokenBank {
 
     function chainId() external view returns(uint256){
         return block.chainid;
+    }
+
+    function chargeFee(string memory name, uint256 amount)private{
+        require(0 != baseFees[name],"no such token");
+        address usdc = tokenNames["usdc"];
+        require(usdc != address(0), "Invalid usdc address");
+
+        uint256 baseFee = baseFees[name];
+        if (0!=baseFee){
+            require(IERC20(usdc).transferFrom(msg.sender, address(this), baseFee),"basefee failed");
+        }
+       
+
+        uint256 protocolFee = protocolFees[name];
+        if (0 == protocolFee){
+            return;
+        }
+        uint8 decimal = protocolFeesDecimals[name];
+        require(IERC20(tokenNames[name]).transferFrom(msg.sender, address(this), amount*protocolFee/10**decimal), "fee failed");
     }
 
     // 存入usdc/usdt，给muUSD
@@ -86,7 +102,7 @@ contract TokenBank {
             return; 
         }
 
-        feeCalculator.chargeFee("musd", amount);
+        chargeFee("musd", amount);
         emit TokenReceived(nonces[toChainId], "musd", target, amount, block.chainid, toChainId, 6);
         nonces[toChainId]+=1;
     }
@@ -133,7 +149,7 @@ contract TokenBank {
             IERC20 uToken = IERC20(_uToken);
             require(uToken.transfer(stringToAddress(target), amount), "not enough u");
         }else{
-            feeCalculator.chargeFee(_name, amount);
+            chargeFee(_name, amount);
             emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
@@ -168,7 +184,7 @@ contract TokenBank {
         address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
        
-        feeCalculator.chargeFee(_name, _amount);
+        chargeFee(_name, _amount);
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
             IMintableToken token = IMintableToken(_token);
             token.burnByOwner(msg.sender, _amount);
@@ -396,7 +412,15 @@ contract TokenBank {
         }
     }
 
-    function addToken(address token,  string memory name) external{
+    function changeFee(string memory name, uint256 _baseFee,uint256 _protocolFee,uint8 _decimal)external{
+        require(msg.sender==admin,"invalid sender");
+
+        baseFees[name] = _baseFee;
+        protocolFees[name] = _protocolFee;
+        protocolFeesDecimals[name] = _decimal;
+    }
+
+    function addToken(address token,  string memory name, uint256 _baseFee,uint256 _protocolFee,uint8 _decimal) external{
         require(msg.sender==admin,"invalid sender");
 
         string memory _name = toLowerCase(name);
@@ -407,6 +431,9 @@ contract TokenBank {
         
         tokenNames[_name] = token;
         tokenDecimals[_name] = decimals;
+        baseFees[name] = _baseFee;
+        protocolFees[name] = _protocolFee;
+        protocolFeesDecimals[name] = _decimal;
     }
 
     function removeToken(string memory name) external{
@@ -542,3 +569,4 @@ contract TokenBank {
         address token;
     }
 }
+
