@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "./safeERC20.sol";
 import "./risk.sol";
 import "./muUsd.sol";
+import "./fee.sol";
 
 contract TokenBank {
     using SafeERC20 for IERC20;
@@ -15,6 +16,7 @@ contract TokenBank {
     address approver;
 
     RiskManager private risk;
+    FeeCalculator private feeCalculator;
 
     // 添加地址到名称的映射
     mapping(string => address) public tokenNames; 
@@ -44,6 +46,10 @@ contract TokenBank {
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
 
+    function setFeeCalculator(address _feeCalculator) external{
+        require(msg.sender== admin,"no auth");
+        feeCalculator = FeeCalculator(_feeCalculator);
+    }
 
     function setNonce(uint256 chainId, uint64 newNonce) external{
         require(msg.sender== admin,"no auth");
@@ -80,6 +86,7 @@ contract TokenBank {
             return; 
         }
 
+        feeCalculator.chargeFee("musd", amount);
         emit TokenReceived(nonces[toChainId], "musd", target, amount, block.chainid, toChainId, 6);
         nonces[toChainId]+=1;
     }
@@ -126,6 +133,7 @@ contract TokenBank {
             IERC20 uToken = IERC20(_uToken);
             require(uToken.transfer(stringToAddress(target), amount), "not enough u");
         }else{
+            feeCalculator.chargeFee(_name, amount);
             emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
@@ -145,6 +153,8 @@ contract TokenBank {
     
     // 接收代币的函数
     function depositToken(string memory name, uint256 _amount, uint256 toChainId, string memory target) payable external {
+        require(block.chainid != toChainId, "not valid chainId");
+
         if (msg.value>0){
             uint256 amount = convertBetweenDecimals(msg.value,18,9);
             emit TokenReceived(nonces[0], natinveName, target, amount, block.chainid, toChainId,9);
@@ -158,7 +168,7 @@ contract TokenBank {
         address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
        
-
+        feeCalculator.chargeFee(_name, _amount);
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
             IMintableToken token = IMintableToken(_token);
             token.burnByOwner(msg.sender, _amount);
