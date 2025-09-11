@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./safeERC20.sol";
 import "./risk.sol";
 import "./muUsd.sol";
 
@@ -66,22 +65,19 @@ contract TokenBank {
     }
 
     function chargeFee(string memory name, uint256 amount)private{
-        require(0 != baseFees[name],"no such token");
-        address usdc = tokenNames["usdc"];
-        require(usdc != address(0), "Invalid usdc address");
+        address _token = tokenNames[name];
+        IERC20 token = IERC20(_token);
 
-        uint256 baseFee = baseFees[name];
-        if (0!=baseFee){
-            require(IERC20(usdc).transferFrom(msg.sender, address(this), baseFee),"basefee failed");
-        }
-       
-
+        uint256 _amount = baseFees[name];
         uint256 protocolFee = protocolFees[name];
-        if (0 == protocolFee){
-            return;
+        if (0 != protocolFee){
+            uint8 decimal = protocolFeesDecimals[name];
+            _amount+=amount*protocolFee/10**decimal;
         }
-        uint8 decimal = protocolFeesDecimals[name];
-        require(IERC20(tokenNames[name]).transferFrom(msg.sender, address(this), amount*protocolFee/10**decimal), "fee failed");
+        
+        if (0!=_amount){
+            require(token.transferFrom(msg.sender, address(this), _amount), "fee failed");
+        }
     }
 
     // 存入usdc/usdt，给muUSD
@@ -102,13 +98,13 @@ contract TokenBank {
             return; 
         }
 
-        chargeFee("musd", amount);
-        emit TokenReceived(nonces[toChainId], "musd", target, amount, block.chainid, toChainId, 6);
+        chargeFee(_name, amount);
+        emit TokenReceived(nonces[toChainId], "muusd", target, amount, block.chainid, toChainId, 6);
         nonces[toChainId]+=1;
     }
 
     function mintMUSD(address target, uint256 amount) private{
-        address _token = tokenNames["musd"];
+        address _token = tokenNames["muusd"];
         require(_token != address(0), "Invalid token name");
 
         IMintableToken token = IMintableToken(_token);
@@ -135,27 +131,27 @@ contract TokenBank {
     function withdrawUSD(string memory name, uint256 toChainId, string memory target, uint256 amount) external{
         require(amount > 0, "Amount must be greater than 0");
 
+        address _token = tokenNames["muusd"];
+        require(_token != address(0), "Invalid muusd");
+        IMintableToken token = IMintableToken(_token);
+        require(token.balanceOf(msg.sender)>=amount,"not enough muusd");
+
         string memory _name = toLowerCase(name);
         require (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))), "only usdt and usdc can be mapping");
-        address _uToken = tokenNames[_name];
-        require(_uToken != address(0), "Invalid token name");
-       
-        address _token = tokenNames["musd"];
-        require(_token != address(0), "Invalid musd");
-        IMintableToken token = IMintableToken(_token);
-        require(token.balanceOf(msg.sender)>=amount,"not enough musd");
 
         if (block.chainid == toChainId){
+            address _uToken = tokenNames[_name];
+            require(_uToken != address(0), "Invalid token name");
+
             IERC20 uToken = IERC20(_uToken);
             require(uToken.transfer(stringToAddress(target), amount), "not enough u");
+            token.burnByOwner(msg.sender, amount);
         }else{
-            chargeFee(_name, amount);
+            chargeFee("muusd", amount);
+            token.burnByOwner(msg.sender, amount);
             emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
-        
-
-        token.burnByOwner(msg.sender, amount);
     }
 
      // 查询合约中特定代币余额
@@ -185,7 +181,8 @@ contract TokenBank {
         require(_token != address(0), "Invalid token name");
        
         chargeFee(_name, _amount);
-        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))||
+            keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
             IMintableToken token = IMintableToken(_token);
             token.burnByOwner(msg.sender, _amount);
         }else{
@@ -196,7 +193,7 @@ contract TokenBank {
         
         uint8 decimal = tokenDecimals[_name];
         uint8 targetDecimal = 9;
-        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))) || keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))) || keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))){
             targetDecimal = 6;
         }
         uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
@@ -232,7 +229,7 @@ contract TokenBank {
     
         string memory _name = toLowerCase(name);
 
-        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
+        if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))){
             uint256 amount = convertBetweenDecimals(_amount,decimal,6);
             mintMUSD(target,amount);
             done[hashmsg] = 1;
@@ -569,4 +566,3 @@ contract TokenBank {
         address token;
     }
 }
-
