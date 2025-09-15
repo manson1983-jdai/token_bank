@@ -32,6 +32,9 @@ contract TokenBank {
     mapping(bytes32 => uint8) done; 
     mapping(bytes32=>Application) waitingList;
 
+    address tokenAdmin;
+    address feeAdmin;
+
 
     // 事件：记录U接收
     // event UReceived(uint64 nonce, string target, uint256 amount, uint256 chainId, uint256 toChainId);
@@ -47,11 +50,6 @@ contract TokenBank {
 
     event TokenWithdrawApproved(string token, address contractAddr, address target, uint256 amount);
 
-    function setNonce(uint256 chainId, uint64 newNonce) external{
-        require(msg.sender== admin,"no auth");
-        nonces[chainId] = newNonce;
-    }
-
     function init(string memory name) external{
         require(admin == address(0), "already inited");
         admin = msg.sender;
@@ -60,14 +58,35 @@ contract TokenBank {
        // risk = RiskManager(riskAddr);
     }
 
-    function chainId() external view returns(uint256){
+    function setTokenAdmin(address newAdmin) external{
+        require(msg.sender== admin,"no auth");
+        tokenAdmin = newAdmin;
+    }
+
+    function getTokenAdmin() external view returns(address){ 
+        return tokenAdmin;
+    }
+
+    function setFeeAdmin(address newAdmin) external{
+        require(msg.sender== admin,"no auth");
+        feeAdmin = newAdmin;
+    }
+    function getFeeAdmin() external view returns(address){ 
+        return feeAdmin;
+    }
+
+    function setNonce(uint256 chainId, uint64 newNonce) external{
+        require(msg.sender== admin,"no auth");
+        nonces[chainId] = newNonce;
+    }
+
+
+    function GetchainId() external view returns(uint256){
         return block.chainid;
     }
 
-    function chargeFee(string memory name, uint256 amount)private{
-        address _token = tokenNames[name];
-        IERC20 token = IERC20(_token);
-
+    // 从msg.sender里扣除手续费
+    function chargeFee(string memory name, uint256 amount)private returns(uint256){
         uint256 _amount = baseFees[name];
         uint256 protocolFee = protocolFees[name];
         if (0 != protocolFee){
@@ -76,8 +95,18 @@ contract TokenBank {
         }
         
         if (0!=_amount){
-            require(token.transferFrom(msg.sender, address(this), _amount), "fee failed");
+            address feeAccount = feeAdmin;
+            if (feeAccount == address(0)){
+                feeAccount = admin;
+            }
+
+            address _token = tokenNames[name];
+            IERC20 token = IERC20(_token);
+            //uToken.transfer(stringToAddress(target), amount
+            require(token.transferFrom(msg.sender, feeAccount, _amount), "fee failed");
         }
+
+        return amount - _amount;
     }
 
     // 存入usdc/usdt，给muUSD
@@ -90,16 +119,16 @@ contract TokenBank {
         require (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))), "only usdt and usdc can be mapping");
         
         IERC20 token = IERC20(_token);
-        require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
-        
         if (block.chainid == toChainId){
+            require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
             address targetAddr = stringToAddress(target);
             mintMUSD(targetAddr,amount);
             return; 
         }
 
-        chargeFee(_name, amount);
-        emit TokenReceived(nonces[toChainId], "muusd", target, amount, block.chainid, toChainId, 6);
+        uint256 remain = chargeFee(_name, amount);
+        require(token.transferFrom(msg.sender, address(this), remain), "Transfer failed");
+        emit TokenReceived(nonces[toChainId], "muusd", target, remain, block.chainid, toChainId, 6);
         nonces[toChainId]+=1;
     }
 
@@ -147,9 +176,9 @@ contract TokenBank {
             require(uToken.transfer(stringToAddress(target), amount), "not enough u");
             token.burnByOwner(msg.sender, amount);
         }else{
-            chargeFee("muusd", amount);
-            token.burnByOwner(msg.sender, amount);
-            emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, 6);
+            uint256 remain = chargeFee("muusd", amount);
+            token.burnByOwner(msg.sender, remain);
+            emit TokenReceived(nonces[toChainId], _name, target, remain, block.chainid, toChainId, 6);
             nonces[toChainId]+=1;
         }
     }
@@ -168,8 +197,8 @@ contract TokenBank {
         require(block.chainid != toChainId, "not valid chainId");
 
         if (msg.value>0){
-            uint256 amount = convertBetweenDecimals(msg.value,18,9);
-            emit TokenReceived(nonces[0], natinveName, target, amount, block.chainid, toChainId,9);
+            uint256 realAmount = convertBetweenDecimals(msg.value,18,9);
+            emit TokenReceived(nonces[0], natinveName, target, realAmount, block.chainid, toChainId,9);
             nonces[0]+=1;
             return ;
         }
@@ -180,23 +209,24 @@ contract TokenBank {
         address _token = tokenNames[_name];
         require(_token != address(0), "Invalid token name");
        
-        chargeFee(_name, _amount);
+        uint256 remain = chargeFee(_name, _amount);
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))||
             keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("musd"))){
             IMintableToken token = IMintableToken(_token);
-            token.burnByOwner(msg.sender, _amount);
+            token.burnByOwner(msg.sender, remain);
         }else{
             IERC20 token = IERC20(_token);
-            require(token.transferFrom(msg.sender, address(this), _amount), "Transfer failed");
+            require(token.transferFrom(msg.sender, address(this), remain), "Transfer failed");
         }
         
         
+        // 计算event中的amount
         uint8 decimal = tokenDecimals[_name];
         uint8 targetDecimal = 9;
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdt"))||(keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("usdc"))) || keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))){
             targetDecimal = 6;
         }
-        uint256 amount = convertBetweenDecimals(_amount,decimal,targetDecimal);
+        uint256 amount = convertBetweenDecimals(remain, decimal, targetDecimal);
 
         emit TokenReceived(nonces[toChainId], _name, target, amount, block.chainid, toChainId, targetDecimal);
         nonces[toChainId]+=1;
@@ -230,19 +260,19 @@ contract TokenBank {
         string memory _name = toLowerCase(name);
 
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked("muusd"))){
-            uint256 amount = convertBetweenDecimals(_amount,decimal,6);
-            mintMUSD(target,amount);
+            uint256 realAmount = convertBetweenDecimals(_amount,decimal,6);
+            mintMUSD(target,realAmount);
             done[hashmsg] = 1;
             return;
         }
 
         if (keccak256(abi.encodePacked(_name)) == keccak256(abi.encodePacked(natinveName))) {
-            uint256 amount = convertBetweenDecimals(_amount,decimal,18);
+            uint256 realAmount = convertBetweenDecimals(_amount,decimal,18);
             done[hashmsg] = 1;
             // 检查风控策略
             // if (risk.approve(amount,name,target)){
-                require(target.send(amount),"Transfer failed");
-                emit TokenWithdrawed("native", address(0), target, amount);
+                require(target.send(realAmount),"Transfer failed");
+                emit TokenWithdrawed("native", address(0), target, realAmount);
             // }else{
                 // waitingList[hashmsg] = Application(name,target, amount, address(0));
                 // emit WaitingApp(hashmsg,"native", address(0), target, amount);
@@ -410,7 +440,7 @@ contract TokenBank {
     }
 
     function changeFee(string memory name, uint256 _baseFee,uint256 _protocolFee,uint8 _decimal)external{
-        require(msg.sender==admin,"invalid sender");
+        require(msg.sender==feeAdmin,"invalid sender");
 
         baseFees[name] = _baseFee;
         protocolFees[name] = _protocolFee;
@@ -418,7 +448,7 @@ contract TokenBank {
     }
 
     function addToken(address token,  string memory name, uint256 _baseFee,uint256 _protocolFee,uint8 _decimal) external{
-        require(msg.sender==admin,"invalid sender");
+        require(msg.sender==tokenAdmin,"invalid sender");
 
         string memory _name = toLowerCase(name);
         require(tokenNames[_name] == address(0), "duplicated name");
@@ -434,7 +464,7 @@ contract TokenBank {
     }
 
     function removeToken(string memory name) external{
-        require(msg.sender==admin,"invalid sender");
+        require(msg.sender==tokenAdmin,"invalid sender");
         
         string memory _name = toLowerCase(name);
         delete tokenNames[_name];
